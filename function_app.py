@@ -75,20 +75,24 @@ def create_user(req: func.HttpRequest) -> func.HttpResponse:
         return err("username and folder are required")
     if not username.isalnum():
         return err("username must contain lowercase letters and digits only")
-    client = get_client()
-    client.local_users.create_or_update(
-        RESOURCE_GROUP, STORAGE_ACCOUNT, username,
-        LocalUser(home_directory=f"{CONTAINER}/{folder}", allow_acl_authorization=True, has_shared_key=False),
-    )
-    result = client.local_users.regenerate_password(RESOURCE_GROUP, STORAGE_ACCOUNT, username)
-    audit("create", username, req)
-    return ok({
-        "username": username,
-        "login": f"{STORAGE_ACCOUNT}.{username}",
-        "host": f"{STORAGE_ACCOUNT}.blob.core.windows.net",
-        "port": 22,
-        "password": result.ssh_password,
-    }, 201)
+    try:
+        client = get_client()
+        client.local_users.create_or_update(
+            RESOURCE_GROUP, STORAGE_ACCOUNT, username,
+            LocalUser(home_directory=f"{CONTAINER}/{folder}", allow_acl_authorization=True),
+        )
+        result = client.local_users.regenerate_password(RESOURCE_GROUP, STORAGE_ACCOUNT, username)
+        audit("create", username, req)
+        return ok({
+            "username": username,
+            "login": f"{STORAGE_ACCOUNT}.{username}",
+            "host": f"{STORAGE_ACCOUNT}.blob.core.windows.net",
+            "port": 22,
+            "password": result.ssh_password,
+        }, 201)
+    except Exception as e:
+        logging.exception("create_user failed")
+        return err(str(e), 500)
 
 
 @app.route(route="users/{username}/reset", methods=["POST"])
