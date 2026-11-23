@@ -11,6 +11,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install --target=".python_packages/lib/site-packages" -r requirements.txt
+
       - name: Azure Login
         uses: azure/login@v2
         with:
@@ -21,5 +28,4 @@ jobs:
         with:
           app-name: func-elg-sftp-user-mgr
           slot-name: Production
-          scm-do-build-during-deployment: true
-          enable-oryx-build: true
+          scm-do-build-during-deployment: false
