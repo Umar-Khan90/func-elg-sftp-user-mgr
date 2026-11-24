@@ -96,7 +96,7 @@ def create_user(req: func.HttpRequest) -> func.HttpResponse:
                 permission_scopes=[PermissionScope(
                     permissions="rwdlc",
                     service="blob",
-                    resource_name=CONTAINER,
+                    resource_name=f"{CONTAINER}/{folder}",
                 )],
             ),
         )
