@@ -6,7 +6,7 @@ import os
 from azure.core.exceptions import ResourceNotFoundError, ResourceExistsError
 from azure.identity import DefaultAzureCredential
 from azure.mgmt.storage import StorageManagementClient
-from azure.mgmt.storage.models import LocalUser
+from azure.mgmt.storage.models import LocalUser, LocalUserPermissionScope
 from azure.storage.filedatalake import DataLakeServiceClient
 
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
@@ -90,7 +90,15 @@ def create_user(req: func.HttpRequest) -> func.HttpResponse:
         client = get_client()
         client.local_users.create_or_update(
             RESOURCE_GROUP, STORAGE_ACCOUNT, username,
-            LocalUser(home_directory=f"{CONTAINER}/{folder}", allow_acl_authorization=False),
+            LocalUser(
+                home_directory=f"{CONTAINER}/{folder}",
+                allow_acl_authorization=False,
+                permission_scopes=[LocalUserPermissionScope(
+                    permissions="rwdlc",
+                    service="blob",
+                    resource_name=CONTAINER,
+                )],
+            ),
         )
         result = client.local_users.regenerate_password(RESOURCE_GROUP, STORAGE_ACCOUNT, username)
         audit("create", username, req)
