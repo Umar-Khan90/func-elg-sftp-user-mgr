@@ -90,7 +90,7 @@ def create_user(req: func.HttpRequest) -> func.HttpResponse:
         client = get_client()
         client.local_users.create_or_update(
             RESOURCE_GROUP, STORAGE_ACCOUNT, username,
-            LocalUser(home_directory=f"{CONTAINER}/{folder}", allow_acl_authorization=True),
+            LocalUser(home_directory=f"{CONTAINER}/{folder}", allow_acl_authorization=False),
         )
         result = client.local_users.regenerate_password(RESOURCE_GROUP, STORAGE_ACCOUNT, username)
         audit("create", username, req)
