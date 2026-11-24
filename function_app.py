@@ -3,10 +3,11 @@ import json
 import logging
 import os
 
-from azure.core.exceptions import ResourceNotFoundError
+from azure.core.exceptions import ResourceNotFoundError, ResourceExistsError
 from azure.identity import DefaultAzureCredential
 from azure.mgmt.storage import StorageManagementClient
 from azure.mgmt.storage.models import LocalUser
+from azure.storage.filedatalake import DataLakeServiceClient
 
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
@@ -76,6 +77,16 @@ def create_user(req: func.HttpRequest) -> func.HttpResponse:
     if not username.isalnum():
         return err("username must contain lowercase letters and digits only")
     try:
+        # Create folder in sftp-elg-catalog if it doesn't exist
+        dls = DataLakeServiceClient(
+            f"https://{STORAGE_ACCOUNT}.dfs.core.windows.net",
+            credential=DefaultAzureCredential()
+        )
+        try:
+            dls.get_file_system_client(CONTAINER).get_directory_client(folder).create_directory()
+        except ResourceExistsError:
+            pass  # folder already exists, fine
+
         client = get_client()
         client.local_users.create_or_update(
             RESOURCE_GROUP, STORAGE_ACCOUNT, username,
