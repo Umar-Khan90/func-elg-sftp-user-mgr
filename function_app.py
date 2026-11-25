@@ -21,6 +21,13 @@ def get_client():
     return StorageManagementClient(DefaultAzureCredential(), SUBSCRIPTION_ID)
 
 
+def get_dls():
+    return DataLakeServiceClient(
+        f"https://{STORAGE_ACCOUNT}.dfs.core.windows.net",
+        credential=DefaultAzureCredential()
+    )
+
+
 def is_catalog_user(user) -> bool:
     return bool(user.home_directory and user.home_directory.startswith(f"{CONTAINER}/"))
 
@@ -77,29 +84,34 @@ def create_user(req: func.HttpRequest) -> func.HttpResponse:
     if not username.isalnum():
         return err("username must contain lowercase letters and digits only")
     try:
-        # Create folder in sftp-elg-catalog if it doesn't exist
-        dls = DataLakeServiceClient(
-            f"https://{STORAGE_ACCOUNT}.dfs.core.windows.net",
-            credential=DefaultAzureCredential()
-        )
+        dls = get_dls()
+        dir_client = dls.get_file_system_client(CONTAINER).get_directory_client(folder)
         try:
-            dls.get_file_system_client(CONTAINER).get_directory_client(folder).create_directory()
+            dir_client.create_directory()
         except ResourceExistsError:
-            pass  # folder already exists, fine
+            pass
 
         client = get_client()
         client.local_users.create_or_update(
             RESOURCE_GROUP, STORAGE_ACCOUNT, username,
             LocalUser(
                 home_directory=f"{CONTAINER}/{folder}",
-                allow_acl_authorization=False,
+                allow_acl_authorization=True,
                 permission_scopes=[PermissionScope(
                     permissions="rwdlc",
                     service="blob",
-                    resource_name=f"{CONTAINER}/{folder}",
+                    resource_name=CONTAINER,
                 )],
             ),
         )
+
+        # Get the user's SID and restrict directory access to only this user
+        user = client.local_users.get(RESOURCE_GROUP, STORAGE_ACCOUNT, username)
+        sid = user.sid
+        if sid:
+            acl = f"user::rwx,user:{sid}:rwx,group::---,other::---,default:user:{sid}:rwx,default:group::---,default:other::---"
+            dir_client.set_access_control(acl=acl)
+
         result = client.local_users.regenerate_password(RESOURCE_GROUP, STORAGE_ACCOUNT, username)
         audit("create", username, req)
         return ok({
@@ -132,7 +144,6 @@ def disable_user(req: func.HttpRequest) -> func.HttpResponse:
     u = get_catalog_user(client, username)
     if not u:
         return err("user not found", 404)
-    # Silently rotate password so existing credentials stop working; remove any SSH keys
     client.local_users.regenerate_password(RESOURCE_GROUP, STORAGE_ACCOUNT, username)
     u.ssh_authorized_keys = []
     client.local_users.create_or_update(RESOURCE_GROUP, STORAGE_ACCOUNT, username, u)
@@ -155,8 +166,15 @@ def enable_user(req: func.HttpRequest) -> func.HttpResponse:
 def delete_user(req: func.HttpRequest) -> func.HttpResponse:
     username = req.route_params.get("username")
     client = get_client()
-    if not get_catalog_user(client, username):
+    u = get_catalog_user(client, username)
+    if not u:
         return err("user not found", 404)
+    folder = u.home_directory.split("/", 1)[1]
     client.local_users.delete(RESOURCE_GROUP, STORAGE_ACCOUNT, username)
+    # Also delete the folder
+    try:
+        get_dls().get_file_system_client(CONTAINER).get_directory_client(folder).delete_directory()
+    except Exception:
+        pass
     audit("delete", username, req)
     return ok({"username": username, "status": "deleted"})
