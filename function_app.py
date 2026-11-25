@@ -96,6 +96,10 @@ def create_user(req: func.HttpRequest) -> func.HttpResponse:
 
     container = container_for(username)
     try:
+        client = get_client()
+        if get_managed_user(client, username):
+            return err(f"User '{username}' already exists", 409)
+
         dls = get_dls()
         fs_client = dls.get_file_system_client(container)
 
@@ -109,7 +113,6 @@ def create_user(req: func.HttpRequest) -> func.HttpResponse:
             # Container doesn't exist — create it and tag it as app-managed
             dls.create_file_system(container, metadata={"managedby": "sftp-user-manager"})
 
-        client = get_client()
         client.local_users.create_or_update(
             RESOURCE_GROUP, STORAGE_ACCOUNT, username,
             LocalUser(
