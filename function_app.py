@@ -96,7 +96,7 @@ def create_user(req: func.HttpRequest) -> func.HttpResponse:
             RESOURCE_GROUP, STORAGE_ACCOUNT, username,
             LocalUser(
                 home_directory=f"{CONTAINER}/{folder}",
-                allow_acl_authorization=True,
+                allow_acl_authorization=False,
                 permission_scopes=[PermissionScope(
                     permissions="rwdlc",
                     service="blob",
@@ -104,14 +104,6 @@ def create_user(req: func.HttpRequest) -> func.HttpResponse:
                 )],
             ),
         )
-
-        # Get the user's SID and restrict directory access to only this user
-        user = client.local_users.get(RESOURCE_GROUP, STORAGE_ACCOUNT, username)
-        sid = user.sid
-        if sid:
-            acl = f"user::rwx,user:{sid}:rwx,group::---,other::---,default:user:{sid}:rwx,default:group::---,default:other::---"
-            dir_client.set_access_control(acl=acl)
-
         result = client.local_users.regenerate_password(RESOURCE_GROUP, STORAGE_ACCOUNT, username)
         audit("create", username, req)
         return ok({
