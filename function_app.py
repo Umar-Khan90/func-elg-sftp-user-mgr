@@ -103,11 +103,11 @@ def create_user(req: func.HttpRequest) -> func.HttpResponse:
         try:
             props = fs_client.get_file_system_properties()
             metadata = props.get("metadata") or {}
-            if metadata.get("managed-by") != "sftp-user-manager":
+            if metadata.get("managedby") != "sftp-user-manager":
                 return err(f"Container {container} already exists and was not created by this app", 409)
         except ResourceNotFoundError:
             # Container doesn't exist — create it and tag it as app-managed
-            dls.create_file_system(container, metadata={"managed-by": "sftp-user-manager"})
+            dls.create_file_system(container, metadata={"managedby": "sftp-user-manager"})
 
         client = get_client()
         client.local_users.create_or_update(
