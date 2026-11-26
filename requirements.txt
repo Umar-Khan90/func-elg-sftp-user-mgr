@@ -1,4 +1,5 @@
 azure-functions
 azure-mgmt-storage
 azure-storage-file-datalake
+azure-storage-blob
 azure-identity

@@ -3,10 +3,14 @@ import json
 import logging
 import os
 
+from datetime import datetime, timedelta, timezone
+from urllib.parse import quote
+
 from azure.core.exceptions import ResourceNotFoundError, ResourceExistsError
 from azure.identity import DefaultAzureCredential
 from azure.mgmt.storage import StorageManagementClient
 from azure.mgmt.storage.models import LocalUser, PermissionScope
+from azure.storage.blob import BlobServiceClient, BlobSasPermissions, generate_blob_sas
 from azure.storage.filedatalake import DataLakeServiceClient
 
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
@@ -174,6 +178,63 @@ def enable_user(req: func.HttpRequest) -> func.HttpResponse:
     result = client.local_users.regenerate_password(RESOURCE_GROUP, STORAGE_ACCOUNT, username)
     audit("enable", username, req)
     return ok({"username": username, "login": f"{STORAGE_ACCOUNT}.{username}", "password": result.ssh_password})
+
+
+@app.route(route="files/{username}", methods=["GET"])
+def list_files(req: func.HttpRequest) -> func.HttpResponse:
+    username = req.route_params.get("username")
+    client = get_client()
+    if not get_managed_user(client, username):
+        return err("user not found", 404)
+    container = container_for(username)
+    try:
+        fs = get_dls().get_file_system_client(container)
+        files = []
+        for p in fs.get_paths(recursive=True):
+            if not p.is_directory:
+                files.append({
+                    "name": p.name.split("/")[-1],
+                    "path": p.name,
+                    "size": p.content_length,
+                    "last_modified": p.last_modified.isoformat() if p.last_modified else None,
+                })
+        return ok(files)
+    except Exception as e:
+        logging.exception("list_files failed")
+        return err(str(e), 500)
+
+
+@app.route(route="files/{username}/download", methods=["GET"])
+def download_file(req: func.HttpRequest) -> func.HttpResponse:
+    username = req.route_params.get("username")
+    blob_path = req.params.get("path", "")
+    if not blob_path:
+        return err("path is required")
+    client = get_client()
+    if not get_managed_user(client, username):
+        return err("user not found", 404)
+    container = container_for(username)
+    try:
+        blob_svc = BlobServiceClient(
+            f"https://{STORAGE_ACCOUNT}.blob.core.windows.net",
+            credential=DefaultAzureCredential()
+        )
+        start = datetime.now(timezone.utc)
+        expiry = start + timedelta(hours=1)
+        key = blob_svc.get_user_delegation_key(start, expiry)
+        sas = generate_blob_sas(
+            account_name=STORAGE_ACCOUNT,
+            container_name=container,
+            blob_name=blob_path,
+            user_delegation_key=key,
+            permission=BlobSasPermissions(read=True),
+            expiry=expiry,
+        )
+        url = f"https://{STORAGE_ACCOUNT}.blob.core.windows.net/{container}/{quote(blob_path)}?{sas}"
+        return ok({"url": url})
+    except Exception as e:
+        logging.exception("download_file failed")
+        return err(str(e), 500)
 
 
 @app.route(route="users/{username}", methods=["DELETE"])

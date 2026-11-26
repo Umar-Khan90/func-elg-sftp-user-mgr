@@ -115,6 +115,20 @@
   </div>
 </div>
 
+<!-- Browse Modal -->
+<div class="overlay" id="browseOverlay">
+  <div class="modal" style="width:720px;max-width:96vw">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+      <div>
+        <h3 id="browseTitle">Files</h3>
+        <div style="font-size:0.8rem;color:#888;margin-top:2px" id="browseSubtitle"></div>
+      </div>
+      <button class="btn btn-secondary btn-sm" onclick="closeBrowse()">Close</button>
+    </div>
+    <div id="browseBody"><div class="empty">Loading...</div></div>
+  </div>
+</div>
+
 <!-- Credentials Modal -->
 <div class="overlay" id="credOverlay">
   <div class="modal">
@@ -193,6 +207,7 @@
               <button class="btn btn-sm btn-reset" onclick="resetPwd('${u.username}')">Reset Password</button>
               <button class="btn btn-sm btn-disable" onclick="disableUser('${u.username}')">Disable</button>
               <button class="btn btn-sm btn-enable" onclick="enableUser('${u.username}')">Enable</button>
+              <button class="btn btn-sm btn-secondary" onclick="browseUser('${u.username}')">Browse</button>
               <button class="btn btn-sm btn-delete" onclick="deleteUser('${u.username}')">Delete</button>
             </div>
           </td>
@@ -296,6 +311,56 @@
     document.addEventListener(e, resetTimer, { passive: true })
   );
   resetTimer();
+
+  // ── File browser ──────────────────────────────────────────
+  function humanSize(bytes) {
+    if (!bytes) return '0 B';
+    const u = ['B','KB','MB','GB'];
+    let i = 0;
+    while (bytes >= 1024 && i < u.length - 1) { bytes /= 1024; i++; }
+    return bytes.toFixed(1) + ' ' + u[i];
+  }
+
+  async function browseUser(username) {
+    document.getElementById('browseTitle').textContent = `Files — ${username}`;
+    document.getElementById('browseSubtitle').textContent = `sftp-elg-${username}`;
+    document.getElementById('browseBody').innerHTML = '<div class="empty">Loading...</div>';
+    document.getElementById('browseOverlay').classList.add('open');
+    try {
+      const files = await api('GET', `/files/${username}`);
+      if (!files.length) {
+        document.getElementById('browseBody').innerHTML = '<div class="empty">No files uploaded yet.</div>';
+        return;
+      }
+      document.getElementById('browseBody').innerHTML = `
+        <table>
+          <thead><tr><th>Path</th><th>Size</th><th>Last Modified</th><th></th></tr></thead>
+          <tbody>${files.map(f => `
+            <tr>
+              <td style="word-break:break-all"><code>${f.path}</code></td>
+              <td style="white-space:nowrap">${humanSize(f.size)}</td>
+              <td style="white-space:nowrap">${f.last_modified ? new Date(f.last_modified).toLocaleString() : '—'}</td>
+              <td><button class="btn btn-sm btn-primary" onclick="downloadFile('${username}','${f.path.replace(/\\/g,'\\\\').replace(/'/g,"\\'")}')">Download</button></td>
+            </tr>`).join('')}
+          </tbody>
+        </table>`;
+    } catch(e) {
+      document.getElementById('browseBody').innerHTML = `<div class="alert alert-error">${e.message}</div>`;
+    }
+  }
+
+  function closeBrowse() {
+    document.getElementById('browseOverlay').classList.remove('open');
+  }
+
+  async function downloadFile(username, path) {
+    try {
+      const data = await api('GET', `/files/${username}/download?path=${encodeURIComponent(path)}`);
+      window.open(data.url, '_blank');
+    } catch(e) {
+      showAlert('Download failed: ' + e.message, 'error');
+    }
+  }
 </script>
 </body>
 </html>
