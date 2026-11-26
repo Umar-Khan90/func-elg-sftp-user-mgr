@@ -264,7 +264,7 @@
   }).catch(() => {});
 
   function logout() {
-    window.location.href = '/.auth/logout';
+    window.location.href = '/.auth/logout?post_logout_redirect_uri=/manager';
   }
 
   // Auto-logout after 30 minutes of inactivity
