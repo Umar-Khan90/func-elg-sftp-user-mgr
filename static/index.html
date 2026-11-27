@@ -98,7 +98,32 @@
   </div>
 
   <div class="card">
-    <h2>Retailer Users</h2>
+    <h2>Bulk Import <small style="font-weight:400;color:#888;font-size:0.8rem">— from DocEvent migration or CSV</small></h2>
+    <p style="font-size:0.82rem;color:#666;margin-bottom:12px">Enter one username per line. Usernames must be lowercase letters and digits only — no underscores (e.g. use <code>sharjahcoop</code> not <code>sharjah_coop</code>).</p>
+    <div style="display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap">
+      <textarea id="importText" rows="6" placeholder="ajman&#10;viva&#10;almaya&#10;gmggroup&#10;choithrams&#10;safeer" style="width:260px;border:1px solid #d0d0d0;border-radius:6px;padding:8px 12px;font-size:0.88rem;font-family:monospace;resize:vertical"></textarea>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <button class="btn btn-primary" onclick="runImport()">Import Users</button>
+        <div id="importStatus" style="font-size:0.8rem;color:#888"></div>
+      </div>
+    </div>
+    <div id="importResults" style="margin-top:16px;display:none">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <strong style="font-size:0.88rem">Import Results</strong>
+        <button class="btn btn-sm btn-secondary" onclick="downloadImportCSV()">Download CSV</button>
+      </div>
+      <table>
+        <thead><tr><th>Username</th><th>Status</th><th>Login</th><th>Password</th><th>Error</th></tr></thead>
+        <tbody id="importBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+      <h2 style="margin-bottom:0">Retailer Users</h2>
+      <button class="btn btn-sm btn-secondary" onclick="exportUsers()">Export CSV</button>
+    </div>
     <table>
       <thead>
         <tr>
@@ -312,7 +337,53 @@
   );
   resetTimer();
 
-  // ── File browser ──────────────────────────────────────────
+  // ── Bulk import ───────────────────────────────────────────
+  let lastImportResults = [];
+
+  async function runImport() {
+    const text = document.getElementById('importText').value.trim();
+    if (!text) return showAlert('Enter at least one username.', 'error');
+    const usernames = text.split('\n').map(s => s.trim()).filter(Boolean);
+    document.getElementById('importStatus').textContent = `Importing ${usernames.length} user(s)…`;
+    try {
+      lastImportResults = await api('POST', '/users/import', { usernames });
+      const tbody = document.getElementById('importBody');
+      tbody.innerHTML = lastImportResults.map(r => `
+        <tr>
+          <td><code>${r.username}</code></td>
+          <td><span style="color:${r.status==='created'?'#137333':'#c5221f'};font-weight:600">${r.status}</span></td>
+          <td>${r.login ? `<code>${r.login}</code>` : '—'}</td>
+          <td>${r.password ? `<code style="color:#c5221f">${r.password}</code>` : '—'}</td>
+          <td style="color:#c5221f;font-size:0.8rem">${r.error || ''}</td>
+        </tr>`).join('');
+      const created = lastImportResults.filter(r => r.status === 'created').length;
+      document.getElementById('importStatus').textContent = `Done — ${created} created, ${lastImportResults.length - created} failed.`;
+      document.getElementById('importResults').style.display = 'block';
+      loadUsers();
+    } catch(e) {
+      document.getElementById('importStatus').textContent = '';
+      showAlert('Import failed: ' + e.message, 'error');
+    }
+  }
+
+  function downloadImportCSV() {
+    const rows = [['username','status','container','login','host','port','password','error']];
+    lastImportResults.forEach(r => rows.push([
+      r.username, r.status, r.container||'', r.login||'',
+      r.host||'', r.port||'', r.password||'', r.error||''
+    ]));
+    const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
+    const a = document.createElement('a');
+    a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+    a.download = 'sftp-import-results.csv';
+    a.click();
+  }
+
+  function exportUsers() {
+    window.location.href = '/users/export';
+  }
+
+  // ── File browser ───────────────────────────────────────────
   function humanSize(bytes) {
     if (!bytes) return '0 B';
     const u = ['B','KB','MB','GB'];

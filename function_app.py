@@ -180,6 +180,88 @@ def enable_user(req: func.HttpRequest) -> func.HttpResponse:
     return ok({"username": username, "login": f"{STORAGE_ACCOUNT}.{username}", "password": result.ssh_password})
 
 
+@app.route(route="users/export", methods=["GET"])
+def export_users(req: func.HttpRequest) -> func.HttpResponse:
+    client = get_client()
+    users = [u for u in client.local_users.list(RESOURCE_GROUP, STORAGE_ACCOUNT) if is_managed_user(u)]
+    lines = ["username,container,login,host,port"]
+    for u in users:
+        lines.append(f"{u.name},{container_for(u.name)},{STORAGE_ACCOUNT}.{u.name},{STORAGE_ACCOUNT}.blob.core.windows.net,22")
+    return func.HttpResponse(
+        "\n".join(lines),
+        status_code=200,
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=sftp-users.csv"}
+    )
+
+
+@app.route(route="users/import", methods=["POST"])
+def bulk_import(req: func.HttpRequest) -> func.HttpResponse:
+    body = req.get_json()
+    usernames = body.get("usernames", [])
+    if not usernames or not isinstance(usernames, list):
+        return err("usernames array is required")
+    if len(usernames) > 50:
+        return err("maximum 50 users per import")
+
+    client = get_client()
+    dls = get_dls()
+    results = []
+
+    for raw in usernames:
+        username = str(raw).lower().strip()
+        entry = {"username": username}
+        try:
+            if not username:
+                entry.update({"status": "error", "error": "empty username"}); results.append(entry); continue
+            if not username.isalnum():
+                entry.update({"status": "error", "error": "invalid characters — letters and digits only, no underscores"}); results.append(entry); continue
+            if len(username) > 50:
+                entry.update({"status": "error", "error": "username too long"}); results.append(entry); continue
+
+            if get_managed_user(client, username):
+                entry.update({"status": "error", "error": "user already exists"}); results.append(entry); continue
+
+            container = container_for(username)
+            fs_client = dls.get_file_system_client(container)
+            try:
+                props = fs_client.get_file_system_properties()
+                metadata = props.get("metadata") or {}
+                if metadata.get("managedby") != "sftp-user-manager":
+                    entry.update({"status": "error", "error": f"container {container} exists and is not managed by this app"}); results.append(entry); continue
+            except ResourceNotFoundError:
+                dls.create_file_system(container, metadata={"managedby": "sftp-user-manager"})
+
+            client.local_users.create_or_update(
+                RESOURCE_GROUP, STORAGE_ACCOUNT, username,
+                LocalUser(
+                    home_directory=container,
+                    allow_acl_authorization=False,
+                    permission_scopes=[PermissionScope(
+                        permissions="rwdlc",
+                        service="blob",
+                        resource_name=container,
+                    )],
+                ),
+            )
+            pwd = client.local_users.regenerate_password(RESOURCE_GROUP, STORAGE_ACCOUNT, username)
+            audit("bulk-import", username, req)
+            entry.update({
+                "status": "created",
+                "container": container,
+                "login": f"{STORAGE_ACCOUNT}.{username}",
+                "host": f"{STORAGE_ACCOUNT}.blob.core.windows.net",
+                "port": 22,
+                "password": pwd.ssh_password,
+            })
+        except Exception as e:
+            logging.exception(f"bulk_import failed for {username}")
+            entry.update({"status": "error", "error": str(e)})
+        results.append(entry)
+
+    return ok(results)
+
+
 @app.route(route="files/{username}", methods=["GET"])
 def list_files(req: func.HttpRequest) -> func.HttpResponse:
     username = req.route_params.get("username")
